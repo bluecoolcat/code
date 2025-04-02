@@ -1,0 +1,12 @@
+pandas
+openpyxl
+moviepy==1.0.3
+pyttsx3==2.90
+pywin32>=307
+Pillow>=9.0.0  # For image manipulation and text rendering
+requests>=2.25.1  # 用于HTTP请求
+websocket-client>=1.2.1  # 用于WebSocket连接
+pydub>=0.25.1  # 用于音频处理和降噪
+ntplib>=0.4.0  # 用于检查系统时间
+dnspython>=2.3.0  # 用于DNS解析检查
+cffi>=1.12.3  # 用于WebSocket客户端
