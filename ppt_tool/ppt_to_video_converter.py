@@ -714,7 +714,7 @@ def ppt_to_video(ppt_path, output_video_path, tts_engine="ttsmaker", language=No
                                         
                                         # 找到所有逗号位置并分段
                                         for i, char in enumerate(text):
-                                            if char in ',，':
+                                            if char in ',，;；':
                                                 segments.append(text[last_end:i+1])  # 包含逗号
                                                 last_end = i+1
                                         

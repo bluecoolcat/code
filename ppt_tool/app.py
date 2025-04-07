@@ -32,7 +32,7 @@ class TextRedirector:
 class PPTToVideoApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("PPT转视频工具")
+        self.root.title("微源PPT转视频工具v1.0")
         self.root.geometry("700x900")  # 减小窗口的默认高度
         self.root.resizable(True, True)
         
