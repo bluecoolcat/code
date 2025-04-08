@@ -73,7 +73,7 @@ def estimate_line_duration(text, cn_char_duration=0.2048, en_word_duration=0.35,
 
     return line_duration
 
-def ppt_to_video(ppt_path, output_video_path, tts_engine="ttsmaker", language=None, xfyun_params=None, ttsmaker_params=None, subtitle_params=None, pronunciation_dict=None):
+def ppt_to_video(ppt_path, output_video_path, tts_engine="ttsmaker", language=None, xfyun_params=None, ttsmaker_params=None, subtitle_params=None, pronunciation_dict=None, watermark_params=None):
     """
     Convert PowerPoint presentation to video with narration.
     
@@ -91,10 +91,29 @@ def ppt_to_video(ppt_path, output_video_path, tts_engine="ttsmaker", language=No
                     Optional keys: 'bg_color', 'font_size', 'font_color'
     - pronunciation_dict: Dictionary mapping characters to their preferred pronunciation
                     Example: {'压': '鸭', '参': '餐'}
+    - watermark_params: Dictionary containing watermark parameters
+                    Required keys: 'image_path'
+                    Optional keys: 'opacity' (0.0-1.0, default 0.3)
     """
     # Convert paths to absolute paths
     ppt_path = os.path.abspath(ppt_path)
+    
+    # Sanitize output path - normalize the path and ensure it's in a safe format
     output_video_path = os.path.abspath(output_video_path)
+    output_dir = os.path.dirname(output_video_path)
+    output_filename = os.path.basename(output_video_path)
+    
+    # Make sure output directory exists
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Generate a safer temporary output path without special characters or spaces
+    temp_output_path = os.path.join(
+        tempfile.gettempdir(), 
+        f"ppt_video_output_{int(time.time())}.mp4"
+    )
+    
+    print(f"原始输出路径: {output_video_path}")
+    print(f"临时输出路径: {temp_output_path}")
     
     # Check if the PowerPoint file exists
     if not os.path.exists(ppt_path):
@@ -121,6 +140,24 @@ def ppt_to_video(ppt_path, output_video_path, tts_engine="ttsmaker", language=No
     bg_color = bg_color_map.get(bg_color_name, (255, 255, 255, 200))
     
     print(f"字幕设置: 背景颜色={bg_color_name}, 字体大小={font_size}, 字体颜色=RGB{font_color}")
+
+    # 处理水印参数
+    watermark_image = None
+    watermark_opacity = 0.3  # 默认透明度
+    
+    if watermark_params and 'image_path' in watermark_params:
+        try:
+            watermark_path = watermark_params['image_path']
+            if os.path.exists(watermark_path):
+                watermark_image = PILImage.open(watermark_path)
+                # 获取不透明度，如果指定了的话
+                watermark_opacity = watermark_params.get('opacity', 0.3)
+                print(f"水印图片已加载: {watermark_path}, 不透明度: {watermark_opacity:.2f}")
+            else:
+                print(f"警告: 水印图片不存在: {watermark_path}")
+        except Exception as e:
+            print(f"加载水印图片时出错: {e}")
+            watermark_image = None
 
     # Create PowerPoint application
     ppt_app = None
@@ -525,13 +562,68 @@ def ppt_to_video(ppt_path, output_video_path, tts_engine="ttsmaker", language=No
                                 # Load image and create a copy to draw on
                                 base_image = PILImage.open(img_path)
                                 
-                                # Create a function to render text at the bottom of the image
+                                # Function to apply watermark to an image
+                                def add_watermark_to_image(image, watermark, opacity=0.3):
+                                    if watermark is None:
+                                        return image
+                                        
+                                    # Make a copy of the image to avoid modifying the original
+                                    result = image.copy()
+                                    
+                                    # Check if we should fill the screen with watermark
+                                    
+                                    # Resize the watermark to match the image dimensions exactly
+                                    new_size = (result.width, result.height)
+                                    watermark = watermark.resize(new_size, PILImage.LANCZOS)
+                                    #print(f"水印已调整为铺满屏幕: {new_size[0]}x{new_size[1]}")
+
+                                    
+                                    # Create an RGBA version of the watermark
+                                    if watermark.mode != 'RGBA':
+                                        watermark = watermark.convert('RGBA')
+                                    
+                                    # Create a transparent layer for compositing
+                                    transparent = PILImage.new('RGBA', result.size, (0, 0, 0, 0))
+                                    
+                                    # Calculate position to center the watermark
+                                    position = ((result.width - watermark.width) // 2,
+                                               (result.height - watermark.height) // 2)
+                                    
+                                    # Apply the watermark with desired opacity
+                                    # Adjust alpha channel
+                                    watermark_with_opacity = watermark.copy()
+                                    alpha = watermark_with_opacity.split()[3]
+                                    alpha = alpha.point(lambda x: int(x * opacity))
+                                    watermark_with_opacity.putalpha(alpha)
+                                    
+                                    # Paste watermark onto transparent layer
+                                    transparent.paste(watermark_with_opacity, position, watermark_with_opacity)
+                                    
+                                    # Convert result to RGBA if needed
+                                    if result.mode != 'RGBA':
+                                        result = result.convert('RGBA')
+                                    
+                                    # Composite the images
+                                    result = PILImage.alpha_composite(result, transparent)
+                                    
+                                    # Convert back to RGB if original was RGB
+                                    if image.mode == 'RGB':
+                                        result = result.convert('RGB')
+                                        
+                                    return result
+                                
+                                # 修改原来的 add_subtitles_to_image 函数，增加水印功能
                                 def add_subtitles_to_image(image, text, font_size=28, bg_color=None, bg_color_name='白色半透明', font_color=(38, 74, 145)):
                                     # Make a copy to avoid modifying the original
                                     img_with_text = image.copy()
+                                    
+                                    # Apply watermark if available
+                                    if watermark_image is not None:
+                                        img_with_text = add_watermark_to_image(img_with_text, watermark_image, watermark_opacity)
+                                        
                                     draw = PILImageDraw.Draw(img_with_text)
                                     
-                                    # Try to use a system font
+                                    # Rest of original function remains the same
                                     try:
                                         font = PILImageFont.truetype('simhei.ttf', font_size)
                                     except Exception:
@@ -637,7 +729,7 @@ def ppt_to_video(ppt_path, output_video_path, tts_engine="ttsmaker", language=No
                                     replacement_map = {}  # 保存标记到原始文本的映射
                                     
                                     for i, (pattern, start, end) in enumerate(all_matches):
-                                        marker = f"<PROTECTED{i}>"
+                                        marker = f"<P{i}>"
                                         replacement_map[marker] = pattern
                                         protected_text = protected_text[:start] + marker + protected_text[end:]
                                     
@@ -714,7 +806,7 @@ def ppt_to_video(ppt_path, output_video_path, tts_engine="ttsmaker", language=No
                                         
                                         # 找到所有逗号位置并分段
                                         for i, char in enumerate(text):
-                                            if char in ',，;；':
+                                            if (char in ',，;；'):
                                                 segments.append(text[last_end:i+1])  # 包含逗号
                                                 last_end = i+1
                                         
@@ -1137,57 +1229,114 @@ def ppt_to_video(ppt_path, output_video_path, tts_engine="ttsmaker", language=No
             if clips:
                 print(f"合成 {len(clips)} 个片段为最终视频...")
                 
-                # 移除交叉淡入淡出效果，因为它会导致黑屏问题
-                # 直接拼接视频片段，依靠音频中的静音缓冲区避免噪音
-                final_clip = concatenate_videoclips(clips, method="compose")  # 仅使用compose方法而非crossfade
-                
-                # 添加整体淡入淡出效果
-                if final_clip.duration > 2.0:
-                    final_clip = final_clip.fadein(0.0).fadeout(0.5)
-                
-                # 多线程导出视频以提高效率
                 try:
-                    # 获取CPU核心数，用于设置线程数
-                    import multiprocessing
-                    cpu_count = multiprocessing.cpu_count()
-                    # 使用CPU核心数的75%作为线程数，最少2个线程，最多12个线程
-                    threads = max(2, min(12, int(cpu_count * 0.75)))
-                    print(f"检测到 {cpu_count} 个CPU核心，将使用 {threads} 个线程进行视频导出")
+                    # 移除交叉淡入淡出效果，因为它会导致黑屏问题
+                    # 直接拼接视频片段，依靠音频中的静音缓冲区避免噪音
+                    final_clip = concatenate_videoclips(clips, method="compose")  # 仅使用compose方法而非crossfade
                     
-                    # 使用更高效的FFMPEG参数
-                    ffmpeg_params = [
-                        "-preset", "medium",  # 中等压缩率，平衡速度和质量
-                        "-crf", "21",         # 恒定质量因子，较好的视频质量，数值越小质量越高
-                        "-movflags", "+faststart",  # 优化文件结构以便快速开始播放
-                        "-profile:v", "high", # 使用高配置文件提高兼容性
-                        "-tune", "stillimage" # 针对幻灯片优化
-                    ]
+                    # 添加整体淡入淡出效果
+                    if final_clip.duration > 2.0:
+                        final_clip = final_clip.fadein(0.0).fadeout(0.5)
                     
-                    # 提高音频质量设置
-                    print(f"开始多线程导出视频到: {output_video_path}")
-                    final_clip.write_videofile(
-                        output_video_path, 
-                        fps=24, 
-                        codec='libx264', 
-                        audio_codec='aac', 
-                        audio_bitrate='192k',
-                        threads=threads,  # 使用多线程
-                        ffmpeg_params=ffmpeg_params,  # 使用优化的FFMPEG参数
-                        logger=None  # 不使用进度条，减少控制台输出
-                    )
-                    print(f"视频导出成功: {output_video_path}")
-                except Exception as e:
-                    print(f"多线程导出失败 ({e})，将使用单线程导出...")
-                    # 单线程备选方案
-                    final_clip.write_videofile(
-                        output_video_path, 
-                        fps=24, 
-                        codec='libx264', 
-                        audio_codec='aac', 
-                        audio_bitrate='192k'
-                    )
-                
-                print(f"视频创建成功: {output_video_path}")
+                    # 先输出到临时文件，成功后再复制到最终位置
+                    print(f"开始导出视频到临时位置: {temp_output_path}")
+                    
+                    try:
+                        # 首先尝试使用多线程导出
+                        import multiprocessing
+                        cpu_count = multiprocessing.cpu_count()
+                        threads = max(2, min(12, int(cpu_count * 0.75)))
+                        print(f"检测到 {cpu_count} 个CPU核心，将使用 {threads} 个线程进行视频导出")
+                        
+                        ffmpeg_params = [
+                            "-preset", "medium",
+                            "-crf", "21",
+                            "-movflags", "+faststart",
+                            "-profile:v", "high",
+                            "-tune", "stillimage"
+                        ]
+                        
+                        # 添加安全参数以处理特殊字符
+                        ffmpeg_params.extend(["-ignore_unknown", "-strict", "experimental"])
+                        
+                        final_clip.write_videofile(
+                            temp_output_path, 
+                            fps=24, 
+                            codec='libx264', 
+                            audio_codec='aac', 
+                            audio_bitrate='192k',
+                            threads=threads,
+                            ffmpeg_params=ffmpeg_params,
+                            logger=None,
+                            verbose=False
+                        )
+                        print(f"视频成功导出到临时位置")
+                    except Exception as e:
+                        print(f"多线程导出失败 ({e})，将使用单线程导出...")
+                        
+                        try:
+                            # 简化参数的单线程备选方案
+                            final_clip.write_videofile(
+                                temp_output_path, 
+                                fps=24, 
+                                codec='libx264', 
+                                audio_codec='aac',
+                                verbose=False,
+                                logger=None
+                            )
+                            print(f"单线程导出成功")
+                        except Exception as e2:
+                            print(f"单线程导出也失败 ({e2})，尝试使用最简单的设置...")
+                            
+                            # 最后的备选方法 - 使用最简单的设置
+                            try:
+                                final_clip.write_videofile(
+                                    temp_output_path,
+                                    verbose=False,
+                                    logger=None
+                                )
+                                print(f"使用最简单设置导出成功")
+                            except Exception as e3:
+                                print(f"所有导出方法都失败: {e3}")
+                                raise
+                    
+                    # 如果临时文件成功生成，复制到最终位置
+                    if os.path.exists(temp_output_path):
+                        print(f"临时文件已生成，大小: {os.path.getsize(temp_output_path) / (1024*1024):.2f} MB")
+                        
+                        # 如果目标文件已存在，先尝试删除
+                        if os.path.exists(output_video_path):
+                            try:
+                                print(f"目标文件已存在，尝试删除: {output_video_path}")
+                                os.remove(output_video_path)
+                            except Exception as e:
+                                # 如果删除失败，生成一个新的唯一文件名
+                                print(f"无法删除现有文件 ({e})，使用新的文件名")
+                                base, ext = os.path.splitext(output_video_path)
+                                output_video_path = f"{base}_{int(time.time())}{ext}"
+                                print(f"新的输出路径: {output_video_path}")
+                        
+                        # 复制文件到最终位置
+                        try:
+                            import shutil
+                            shutil.copy2(temp_output_path, output_video_path)
+                            print(f"视频已成功复制到最终位置: {output_video_path}")
+                            
+                            # 复制成功后删除临时文件
+                            try:
+                                os.remove(temp_output_path)
+                            except:
+                                pass
+                        except Exception as copy_error:
+                            print(f"复制文件失败 ({copy_error})，临时文件仍保留在: {temp_output_path}")
+                            # 如果复制失败，将临时路径作为输出路径返回
+                            output_video_path = temp_output_path
+                    
+                    print(f"视频创建成功: {output_video_path}")
+                except Exception as concat_error:
+                    print(f"合成视频失败: {concat_error}")
+                    print(traceback.format_exc())
+                    raise Exception(f"合成视频失败: {str(concat_error)}")
             else:
                 # 如果clips列表为空，提供更明确的错误信息
                 print(f"错误: 没有成功创建任何视频片段。以下是处理过的幻灯片索引: {slides_to_process}")

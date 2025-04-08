@@ -32,8 +32,8 @@ class TextRedirector:
 class PPTToVideoApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("微源PPT转视频工具v1.0")
-        self.root.geometry("700x900")  # 减小窗口的默认高度
+        self.root.title("微源PPT转视频工具v1.2")
+        self.root.geometry("800x900")  # 减小窗口的默认高度
         self.root.resizable(True, True)
         
         # 科大讯飞参数
@@ -55,6 +55,11 @@ class PPTToVideoApp:
         
         # 添加文件状态字典 - 用于跟踪每个文件的转换状态
         self.file_statuses = {}  # 格式: {文件索引: "success"/"failed"}
+        
+        # 添加水印相关变量
+        self.use_watermark = tk.BooleanVar(value=False)
+        self.watermark_opacity = tk.IntVar(value=100)
+        self._full_watermark_path = None  # 存储完整的水印图片路径
         
         self.setup_ui()
     
@@ -269,7 +274,7 @@ class PPTToVideoApp:
         bg_color_combo.grid(row=0, column=1, sticky=tk.W, pady=5)
         
         # 添加字体颜色RGB设置 - 向右移动40像素
-        ttk.Label(subtitle_frame, text="字体颜色(RGB):").grid(row=0, column=2, sticky=tk.W, pady=5, padx=(50, 0))  # 原来是(10, 0)，增加到(50, 0)
+        ttk.Label(subtitle_frame, text="字体颜色(RGB):").grid(row=0, column=2, sticky=tk.W, pady=5, padx=(10, 0))  # 原来是(10, 0)，增加到(50, 0)
         self.font_color_rgb = tk.StringVar(value="44, 84, 162")  # 默认深蓝色
         font_color_entry = ttk.Entry(subtitle_frame, textvariable=self.font_color_rgb, width=12)
         font_color_entry.grid(row=0, column=3, sticky=tk.W, pady=5)
@@ -293,7 +298,49 @@ class PPTToVideoApp:
         
         # 添加精准字幕复选框 - 移动到右侧与字体颜色标签水平对齐
         ttk.Checkbutton(subtitle_frame, text="精准字幕", variable=self.precise_subtitle).grid(
-            row=1, column=2, sticky=tk.W, pady=5, padx=(50, 0))
+            row=1, column=2, sticky=tk.W, pady=5, padx=(10, 0))
+        
+        # 添加图片水印设置区域
+        #ttk.Separator(subtitle_frame, orient=tk.HORIZONTAL).grid(row=2, column=0, columnspan=4, sticky=tk.EW, pady=8)
+        
+        # 添加图片水印复选框
+        self.use_watermark = tk.BooleanVar(value=False)
+        ttk.Checkbutton(subtitle_frame, text="添加水印", variable=self.use_watermark).grid(
+            row=0, column=4, sticky=tk.W, pady=5, padx=(20, 0))
+        
+        # 添加选择图片按钮
+        ttk.Button(subtitle_frame, text="选择图片", command=self.select_watermark_image).grid(
+            row=0, column=5, sticky=tk.W, pady=5)
+        
+        # 添加图片路径显示标签
+        self.watermark_path = tk.StringVar(value="未选择图片")
+        ttk.Label(subtitle_frame, textvariable=self.watermark_path, width=30, 
+                 font=("Arial", 8), foreground="gray").grid(
+            row=0, column=6, sticky=tk.W, pady=5)
+        
+        # 添加水印透明度设置
+        ttk.Label(subtitle_frame, text="水印透明度:").grid(row=1, column=4, sticky=tk.W, pady=5, padx=(20, 0))
+        
+        # 创建包含滑块和标签的框架
+        watermark_opacity_container = ttk.Frame(subtitle_frame)
+        watermark_opacity_container.grid(row=1, column=5, sticky=tk.W+tk.E, pady=5)
+        
+        # 透明度变量和滑块
+        self.watermark_opacity = tk.IntVar(value=100)  # 默认30%透明度
+        opacity_scale = ttk.Scale(watermark_opacity_container, from_=5, to=100, 
+                                 variable=self.watermark_opacity, orient=tk.HORIZONTAL, length=80)
+        opacity_scale.pack(side=tk.LEFT)
+        
+        # 透明度数值标签
+        self.watermark_opacity_label = ttk.Label(watermark_opacity_container, text="100%", width=4)
+        self.watermark_opacity_label.pack(side=tk.LEFT, padx=(5, 0))
+        
+        # 更新滑块数值显示的函数
+        def update_opacity_label(*args):
+            self.watermark_opacity_label.config(text=f"{self.watermark_opacity.get()}%")
+        
+        # 绑定滑块值变化事件
+        self.watermark_opacity.trace_add("write", update_opacity_label)
         
         # 更新滑块数值显示的函数
         def update_font_size_label(*args):
@@ -561,6 +608,17 @@ class PPTToVideoApp:
             'precise_subtitle': self.precise_subtitle.get()
         }
         
+        # 添加水印设置
+        watermark_params = None
+        if self.use_watermark.get() and hasattr(self, '_full_watermark_path') and self._full_watermark_path:
+            watermark_params = {
+                'image_path': self._full_watermark_path,
+                'opacity': self.watermark_opacity.get() / 100.0  # 转换为0-1范围
+            }
+            print(f"启用水印: {os.path.basename(self._full_watermark_path)}, 透明度: {self.watermark_opacity.get()}%")
+        else:
+            print("水印功能未启用或未选择图片")
+        
         print("="*50)
         print(f"开始批量转换 {len(self.ppt_files)} 个文件")
         print(f"语音引擎：{tts_engine}")
@@ -597,12 +655,12 @@ class PPTToVideoApp:
         # Start conversion in a separate thread
         conversion_thread = threading.Thread(
             target=self.run_batch_conversion,
-            args=(self.ppt_files, tts_engine, xfyun_params, ttsmaker_params, subtitle_params, pronunciation_dict)
+            args=(self.ppt_files, tts_engine, xfyun_params, ttsmaker_params, subtitle_params, pronunciation_dict, watermark_params)
         )
         conversion_thread.daemon = True
         conversion_thread.start()
     
-    def run_batch_conversion(self, ppt_files, tts_engine, xfyun_params=None, ttsmaker_params=None, subtitle_params=None, pronunciation_dict=None):
+    def run_batch_conversion(self, ppt_files, tts_engine, xfyun_params=None, ttsmaker_params=None, subtitle_params=None, pronunciation_dict=None, watermark_params=None):
         """批量处理多个PPT文件"""
         total_files = len(ppt_files)
         success_count = 0
@@ -620,6 +678,20 @@ class PPTToVideoApp:
             # 自动生成输出路径 - 使用相同目录，更改扩展名为.mp4
             output_path = os.path.splitext(ppt_path)[0] + ".mp4"
             
+            # 确保输出目录存在
+            output_dir = os.path.dirname(output_path)
+            if not os.path.exists(output_dir):
+                try:
+                    os.makedirs(output_dir, exist_ok=True)
+                except Exception as e:
+                    print(f"创建输出目录失败: {e}")
+                    # 如果无法创建目录，使用临时目录
+                    import tempfile
+                    output_dir = tempfile.gettempdir()
+                    output_filename = os.path.basename(output_path)
+                    output_path = os.path.join(output_dir, output_filename)
+                    print(f"将使用临时目录: {output_path}")
+            
             print("\n" + "="*50)
             print(f"开始处理文件 {index + 1}/{total_files}: {ppt_path}")
             print(f"输出路径: {output_path}")
@@ -635,7 +707,8 @@ class PPTToVideoApp:
                     xfyun_params, 
                     ttsmaker_params, 
                     subtitle_params, 
-                    pronunciation_dict
+                    pronunciation_dict,
+                    watermark_params  # 添加水印参数
                 )
                 
                 print(f"文件 {file_name} 处理成功!")
@@ -1010,6 +1083,30 @@ class PPTToVideoApp:
                 self.root.after(0, lambda: messagebox.showerror("错误", f"测试过程出现异常: {e}"))
         
         threading.Thread(target=run_test, daemon=True).start()
+    
+    def select_watermark_image(self):
+        """选择水印图片文件"""
+        filename = filedialog.askopenfilename(
+            title="选择水印图片",
+            filetypes=[("图片文件", "*.png *.jpg *.jpeg *.bmp"), ("所有文件", "*.*")]
+        )
+        
+        if filename:
+            # 检查文件大小
+            try:
+                file_size = os.path.getsize(filename) / (1024 * 1024)  # 转换为MB
+                if file_size > 5:
+                    messagebox.showwarning("文件过大", f"选择的图片文件大小为 {file_size:.1f}MB，建议使用小于5MB的图片作为水印。")
+                
+                # 如果文件有效，更新路径变量
+                self.watermark_path.set(os.path.basename(filename))
+                # 存储完整路径
+                self._full_watermark_path = filename
+                print(f"已选择水印图片: {filename}")
+            except Exception as e:
+                messagebox.showerror("错误", f"读取图片文件时出错: {e}")
+                self.watermark_path.set("未选择图片")
+                self._full_watermark_path = None
     
     def on_close(self):
         # Restore stdout
