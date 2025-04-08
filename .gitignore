@@ -128,3 +128,5 @@ temp/run_with_debug.bat
 temp/simple_packager.py
 temp/simpler_runner.bat
 dma/README.md
+ppt_tran/pptx_translator.py
+ppt_tran/README.md
