@@ -1,0 +1,1 @@
+python pptx_translator.py -i "input_presentation.pptx" -o "translated_presentation.pptx"
