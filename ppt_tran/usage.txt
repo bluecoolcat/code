@@ -1,1 +1,3 @@
 python pptx_translator.py -i "input_presentation.pptx" -o "translated_presentation.pptx"
+
+写一个python程序，把pptx文件中的中文内容转换为英文，并保持格式不变
