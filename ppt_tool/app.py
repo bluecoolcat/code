@@ -32,14 +32,14 @@ class TextRedirector:
 class PPTToVideoApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("微源PPT转视频工具v1.2")
+        self.root.title("微源PPT转视频工具v1.3")
         self.root.geometry("800x900")  # 减小窗口的默认高度
         self.root.resizable(True, True)
         
         # 科大讯飞参数
-        self.xfyun_app_id = tk.StringVar(value="d57717e4")
-        self.xfyun_api_key = tk.StringVar(value="1532a851bee1c2ac827acd8a0d7e7e3c")
-        self.xfyun_api_secret = tk.StringVar(value="ZjY4ZDZlODhmZjE4NTQwNTRmYTQ4MTc4")
+        self.xfyun_app_id = tk.StringVar(value="b6537c6a")
+        self.xfyun_api_key = tk.StringVar(value="2ced9e083736d0b00cd78bd2be7e5c85")
+        self.xfyun_api_secret = tk.StringVar(value="NzlhY2EzYTkyYjlmOGY0ODFkZGQ5OGU0")
         self.xfyun_voice = tk.StringVar(value="x4_yezi")
         self.xfyun_speed = tk.IntVar(value=54)  # 添加语速变量，默认56
         
@@ -61,6 +61,9 @@ class PPTToVideoApp:
         self.watermark_opacity = tk.IntVar(value=100)
         self._full_watermark_path = None  # 存储完整的水印图片路径
         
+        # 添加文件计数器变量（用于目录递归扫描进度）
+        self.file_scan_count = 0
+        
         self.setup_ui()
     
     def setup_ui(self):
@@ -81,13 +84,14 @@ class PPTToVideoApp:
         file_frame.columnconfigure(1, weight=1)  # 让右侧面板可以扩展
         
         # 左侧面板 - 放置标签和按钮
-        ttk.Label(left_panel, text="PPT文件:").pack(anchor=tk.W, pady=(0, 10))
+        #ttk.Label(left_panel, text="PPT文件:").pack(anchor=tk.W, pady=0)
         
         buttons_frame = ttk.Frame(left_panel)
         buttons_frame.pack(fill=tk.X)
         
-        ttk.Button(left_panel, text="添加文件", command=self.browse_ppt, width=15).pack(pady=5)
-        ttk.Button(left_panel, text="删除选中", command=self.delete_selected_files, width=15).pack(pady=5)
+        ttk.Button(left_panel, text="添加文件", command=self.browse_ppt_files, width=15).pack(pady=0)
+        ttk.Button(left_panel, text="添加文件夹", command=self.browse_ppt_folder, width=15).pack(pady=0)
+        ttk.Button(left_panel, text="删除选中", command=self.delete_selected_files, width=15).pack(pady=0)
         
         # 右侧面板 - 放置文件列表
         files_list_frame = ttk.Frame(right_panel)
@@ -416,39 +420,88 @@ class PPTToVideoApp:
         elif (engine == "ttsmaker"):
             self.ttsmaker_frame.grid()
     
-    def browse_ppt(self):
-        """选择和添加PPT文件（累积添加而不是替换）"""
+    def find_ppt_files(self, directory):
+        """递归查找目录及其子目录中的所有PPT文件"""
+        ppt_files = []
+        
+        for root, dirs, files in os.walk(directory):
+            for file in files:
+                self.file_scan_count += 1
+                # 每扫描100个文件更新一次状态
+                if self.file_scan_count % 100 == 0:
+                    self.status_var.set(f"正在扫描文件夹: 已检查 {self.file_scan_count} 个文件...")
+                    self.root.update_idletasks()
+                
+                if file.lower().endswith(('.pptx', '.ppt')):
+                    ppt_path = os.path.join(root, file)
+                    ppt_files.append(ppt_path)
+        
+        return ppt_files
+    
+    def browse_ppt_files(self):
+        """选择和添加PPT文件"""
         filenames = filedialog.askopenfilenames(
             title="选择PPT文件",
             filetypes=[("PowerPoint文件", "*.pptx *.ppt"), ("所有文件", "*.*")]
         )
         
-        if filenames:
-            # 累加文件到列表而不是替换
-            new_files = list(filenames)
+        self._add_files_to_list(list(filenames) if filenames else [])
+    
+    def browse_ppt_folder(self):
+        """选择和添加包含PPT的文件夹"""
+        directory = filedialog.askdirectory(
+            title="选择包含PPT文件的文件夹"
+        )
+        
+        if directory:
+            # 更新状态
+            self.status_var.set("正在扫描文件夹，请稍候...")
+            self.root.update_idletasks()
             
-            # 检查文件是否已在列表中
-            added_count = 0
+            # 重置文件计数器
+            self.file_scan_count = 0
             
-            # 先启用Text组件以添加内容
-            self.files_text.configure(state=tk.NORMAL)
+            # 使用线程避免UI卡死
+            def scan_directory():
+                ppt_files = self.find_ppt_files(directory)
+                
+                # 在UI线程中处理结果
+                self.root.after(0, lambda: self._add_files_to_list(ppt_files))
+                self.root.after(0, lambda: self.status_var.set(
+                    f"文件夹扫描完成。找到 {len(ppt_files)} 个PPT文件，共检查了 {self.file_scan_count} 个文件"))
             
-            for file_path in new_files:
-                if file_path not in self.ppt_files:
-                    self.ppt_files.append(file_path)
-                    # 添加文件名到Text组件，带行号
-                    index = len(self.ppt_files) - 1
-                    file_name = os.path.basename(file_path)
-                    self.files_text.insert(tk.END, f"{file_name}\n", "default")
-                    added_count += 1
+            threading.Thread(target=scan_directory, daemon=True).start()
+    
+    def browse_ppt(self):
+        """保留此方法以兼容可能的外部调用，转发到文件选择方法"""
+        self.browse_ppt_files()
+    
+    def _add_files_to_list(self, new_files):
+        """将文件添加到列表中（内部方法，被browse_ppt调用）"""
+        if not new_files:
+            return
             
-            # 重新禁用Text组件
-            self.files_text.configure(state=tk.DISABLED)
-            
-            print(f"添加了 {added_count} 个新文件，当前共有 {len(self.ppt_files)} 个PPT文件")
-            
-            # 更新状态显示
-            self.status_var.set(f"已选择 {len(self.ppt_files)} 个文件")
+        # 检查文件是否已在列表中
+        added_count = 0
+        
+        # 先启用Text组件以添加内容
+        self.files_text.configure(state=tk.NORMAL)
+        
+        for file_path in new_files:
+            if file_path not in self.ppt_files:
+                self.ppt_files.append(file_path)
+                # 添加文件名到Text组件
+                file_name = os.path.basename(file_path)
+                self.files_text.insert(tk.END, f"{file_name}\n", "default")
+                added_count += 1
+        
+        # 重新禁用Text组件
+        self.files_text.configure(state=tk.DISABLED)
+        
+        print(f"添加了 {added_count} 个新文件，当前共有 {len(self.ppt_files)} 个PPT文件")
+        
+        # 更新状态显示
+        self.status_var.set(f"已选择 {len(self.ppt_files)} 个文件")
     
     def on_file_click(self, event):
         """处理文件列表的点击事件"""
